@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8" />
-    <title>导入导出json</title>
+    <title>导入导出json (19:35)</title>
     <style>
         body {
             margin: 0;
@@ -171,8 +171,9 @@
                 <label>JSON 内容：</label>
                 <textarea id="jsonTextArea" rows="12" style="width: 100%; box-sizing: border-box;"></textarea>
                 <div style="margin-top: 10px; text-align: right;">
-                    <button id="copyJsonBtn">复制全部</button>
-                    <button id="importJsonConfirmBtn">确认导入</button>
+                    <button id="copyJsonBtn">📋复制全部</button>
+                    <button id="clearAllBtn">🧹清空</button>
+                    <button id="importJsonConfirmBtn">📥确认导入</button>
                     <button onclick="closeJsonIO()">关闭</button>
                 </div>
             </div>
@@ -444,9 +445,11 @@
             btnDelete.style.display = "none";
 
             copyJsonBtn.style.display = importMode ? "none" : "inline-block";
+            clearAllBtn.style.display = importMode ? "none" : "inline-block"; // ✅ 新增这行
             importJsonConfirmBtn.style.display = importMode ? "inline-block" : "none";
             jsonTextArea.readOnly = !importMode;
         }
+
 
         function closeJsonIO() {
             modalOverlay.classList.remove("visible");
@@ -485,6 +488,33 @@
                 alert("解析失败：" + e.message);
             }
         };
+
+        const myPassword = "1234";
+        const clearAllBtn = document.getElementById("clearAllBtn");
+        clearAllBtn.onclick = async () => {
+            const password = prompt("请输入密码以确认清空所有数据：");
+            if (password !== myPassword) {
+                alert("密码错误，操作已取消");
+                return;
+            }
+
+            try {
+                await navigator.clipboard.writeText(JSON.stringify(taskMap, null, 4));
+                alert("任务已复制到剪贴板，正在清空全部数据...");
+            } catch (err) {
+                alert("复制失败：" + err.message);
+                return;
+            }
+
+            localStorage.removeItem("timelineTasks");
+            for (const key in taskMap) {
+                delete taskMap[key];
+            }
+            renderTimeline();
+            closeJsonIO();
+            alert("已清空所有任务数据！");
+        };
+
     </script>
 </body>
 </html>
