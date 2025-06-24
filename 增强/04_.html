@@ -2,14 +2,15 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8" />
-    <title>导入导出json</title>
+    <title>时间轴任务管理（12/24小时切换）</title>
     <style>
         body {
             margin: 0;
             font-family: sans-serif;
         }
 
-        button {
+        #toggleModeBtn,
+        #toggleEditBtn {
             margin: 10px 5px;
             padding: 6px 12px;
             font-size: 14px;
@@ -143,14 +144,10 @@
 <body>
     <button id="toggleModeBtn">切换到24小时</button>
     <button id="toggleEditBtn">🔓 可编辑</button>
-    <button id="exportBtn">📤 导出 JSON</button>
-    <button id="importBtn">📥 导入 JSON</button>
-
     <div class="timeline" id="timeline"></div>
 
     <div id="modalOverlay">
         <div id="modalBox">
-            <!-- 普通任务编辑 -->
             <label>开始时间显示（仅文本）:
                 <input type="time" id="startTimeInput" />
             </label>
@@ -160,21 +157,18 @@
             <label>颜色选择:
                 <select id="colorSelect"></select>
             </label>
+            <label>持续时间（块）:
+                <select id="durationSelect">
+                    <option value="1">1 块（30分钟）</option>
+                    <option value="2">2 块（1小时）</option>
+                    <option value="3">3 块（1.5小时）</option>
+                    <option value="4">4 块（2小时）</option>
+                </select>
+            </label>
             <div>
                 <button id="btnSave">保存</button>
                 <button id="btnDelete">删除</button>
                 <button id="btnCancel">取消</button>
-            </div>
-
-            <!-- JSON 导入导出部分 -->
-            <div id="jsonIO" style="display: none;">
-                <label>JSON 内容：</label>
-                <textarea id="jsonTextArea" rows="12" style="width: 100%; box-sizing: border-box;"></textarea>
-                <div style="margin-top: 10px; text-align: right;">
-                    <button id="copyJsonBtn">复制全部</button>
-                    <button id="importJsonConfirmBtn">确认导入</button>
-                    <button onclick="closeJsonIO()">关闭</button>
-                </div>
             </div>
         </div>
     </div>
@@ -214,9 +208,7 @@
         const taskMap = {};
         function loadTasks() {
             const saved = localStorage.getItem("timelineTasks");
-            if (saved) {
-                Object.assign(taskMap, JSON.parse(saved));
-            }
+            if (saved) Object.assign(taskMap, JSON.parse(saved));
         }
 
         function saveTasks() {
@@ -244,14 +236,10 @@
         const taskInput = document.getElementById("taskInput");
         const startTimeInput = document.getElementById("startTimeInput");
         const colorSelect = document.getElementById("colorSelect");
+        const durationSelect = document.getElementById("durationSelect");
         const btnSave = document.getElementById("btnSave");
         const btnDelete = document.getElementById("btnDelete");
         const btnCancel = document.getElementById("btnCancel");
-
-        const jsonIO = document.getElementById("jsonIO");
-        const jsonTextArea = document.getElementById("jsonTextArea");
-        const copyJsonBtn = document.getElementById("copyJsonBtn");
-        const importJsonConfirmBtn = document.getElementById("importJsonConfirmBtn");
 
         presetColors.forEach((c, i) => {
             const opt = document.createElement("option");
@@ -269,11 +257,13 @@
                 startTimeInput.value = existingTask.startText || "";
                 const idx = presetColors.findIndex(c => c.color === existingTask.color);
                 colorSelect.value = idx >= 0 ? idx : defaultCreateColorIndex;
+                durationSelect.value = "1";
                 btnDelete.style.display = "inline-block";
             } else {
                 taskInput.value = "";
                 startTimeInput.value = "";
                 colorSelect.value = defaultCreateColorIndex;
+                durationSelect.value = "1";
                 btnDelete.style.display = "none";
             }
             modalOverlay.style.display = "flex";
@@ -344,19 +334,64 @@
         btnSave.onclick = () => {
             const text = taskInput.value.trim();
             const startText = startTimeInput.value.trim();
+            const duration = parseInt(durationSelect.value);
             if (text === "") {
                 alert("任务内容不能为空！");
                 taskInput.focus();
                 return;
             }
+
             const colorIndex = parseInt(colorSelect.value);
             const color = presetColors[colorIndex] ? presetColors[colorIndex].color : presetColors[defaultCreateColorIndex].color;
 
-            taskMap[currentTimeKey] = { text, color, startText };
+            // 可连续的时间块
+            var availbleBlocks = 2; //为什么选2具体看调试
+
+            // 解析当前时间块
+            const [h, m] = currentTimeKey.split(":").map(Number);
+            const occupiedBlocks = [];
+
+            for (let i = 0; i < duration; i++) {
+                const totalMinutes = h * 60 + m + i * minutesPerBlock;
+                const hh = Math.floor(totalMinutes / 60);
+                const mm = totalMinutes % 60;
+                const key = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+
+                if (taskMap[key]) {
+                    occupiedBlocks.push(key);
+
+                    // 不提示了, 直接退出
+                    break;
+                }
+
+                availbleBlocks++;
+            }
+
+            // if (occupiedBlocks.length > 0) {
+            //     const msg = "以下时间块已有任务：\n" + occupiedBlocks.join(", ") + "\n是否覆盖？";
+            //     if (!confirm(msg)) return;
+            // }
+
+            
+            // 开始写入任务
+                // for (let i = 0; i < duration; i++) {     // 输入的快数
+            for (let i = 0; i < (availbleBlocks < duration ? availbleBlocks : duration); i++) {  // 可用的块数 // 哪个小用那个
+                const totalMinutes = h * 60 + m + i * minutesPerBlock;
+                const hh = Math.floor(totalMinutes / 60);
+                const mm = totalMinutes % 60;
+                const key = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+                taskMap[key] = {
+                    text,
+                    color,
+                    startText: i === 0 ? startText : ""
+                };
+            }
+
             saveTasks();
             renderTimeline();
             closeModal();
         };
+
 
         btnDelete.onclick = () => {
             if (!confirm("确定删除该任务吗？")) return;
@@ -378,7 +413,9 @@
             const now = new Date();
             const currentMinutes = now.getHours() * 60 + now.getMinutes();
             const offsetMinutes = currentMinutes - startHour * 60;
+
             if (offsetMinutes < 0 || offsetMinutes > (endHour - startHour + 1) * 60) return;
+
             const topPos = offsetMinutes * (blockHeight / minutesPerBlock);
             nowLine.style.top = `${topPos}px`;
 
@@ -419,72 +456,6 @@
         }
 
         renderTimeline();
-
-        // JSON 导入导出逻辑
-        document.getElementById("exportBtn").onclick = () => {
-            jsonTextArea.value = JSON.stringify(taskMap, null, 4);
-            showJsonIO(false);
-        };
-
-        document.getElementById("importBtn").onclick = () => {
-            jsonTextArea.value = "";
-            showJsonIO(true);
-        };
-
-        function showJsonIO(importMode) {
-            modalOverlay.style.display = "flex";
-            requestAnimationFrame(() => {
-                modalOverlay.classList.add("visible");
-            });
-            jsonIO.style.display = "block";
-            taskInput.parentElement.style.display = "none";
-            startTimeInput.parentElement.style.display = "none";
-            colorSelect.parentElement.style.display = "none";
-            btnSave.style.display = "none";
-            btnDelete.style.display = "none";
-
-            copyJsonBtn.style.display = importMode ? "none" : "inline-block";
-            importJsonConfirmBtn.style.display = importMode ? "inline-block" : "none";
-            jsonTextArea.readOnly = !importMode;
-        }
-
-        function closeJsonIO() {
-            modalOverlay.classList.remove("visible");
-            setTimeout(() => {
-                modalOverlay.style.display = "none";
-            }, 500);
-            jsonIO.style.display = "none";
-            taskInput.parentElement.style.display = "";
-            startTimeInput.parentElement.style.display = "";
-            colorSelect.parentElement.style.display = "";
-            btnSave.style.display = "";
-        }
-
-        copyJsonBtn.onclick = async () => {
-            try {
-                await navigator.clipboard.writeText(jsonTextArea.value);
-                alert("已复制到剪贴板！");
-            } catch (err) {
-                alert("复制失败：" + err.message);
-            }
-        };
-
-        importJsonConfirmBtn.onclick = () => {
-            try {
-                const data = JSON.parse(jsonTextArea.value);
-                if (typeof data === "object" && data !== null) {
-                    Object.assign(taskMap, data);
-                    saveTasks();
-                    renderTimeline();
-                    closeJsonIO();
-                    alert("导入成功！");
-                } else {
-                    alert("格式不正确");
-                }
-            } catch (e) {
-                alert("解析失败：" + e.message);
-            }
-        };
     </script>
 </body>
 </html>
