@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <title>每小时一格时间轴 - 10分钟小刻度，30分钟大刻度</title>
+    <style>
+        /* 页面基础样式 */
+        body {
+            margin: 0;
+            font-family: sans-serif;
+        }
+
+        /* 时间轴容器，纵向排列时间块 */
+        .timeline {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            padding-left: 80px; /* 给左侧时间标签留空间 */
+        }
+
+        /* 每小时块，高度固定，左边竖线 */
+        .time-block {
+            position: relative;                /* 绝对定位子元素参考 */
+            height: 55px;                    /* 代表1小时高?px */
+            border-left: 2px solid #ddd;     /* 主竖线 */
+            border-bottom: 1px dashed #eee;  /* 分割线 */
+        }
+
+        /* 时间标签，左上角显示 */
+        .time-label {
+            position: absolute;
+            left: -80px; /* 向左80像素 */
+            /* 去掉之前的 top: 0; 改用下面的居中方式 */
+            top: 1px; /* 先放1px，刻度线中心高度 */
+
+            /* 设置固定高度和行高，方便计算 */
+            height: 24px;       /* 假设高度24px */
+            line-height: 24px;  /* 文字垂直居中 */
+            font-size: 14px;
+            color: #666;
+            padding: 0 6px;
+            width: 70px;
+            text-align: right;
+            user-select: none;
+
+            /* 负margin-top将中线调整到刻度线中心 */
+            margin-top: calc(-12px); /* 高度的一半负值 = -height/2 */
+        }
+
+
+        /* 任务标签 */
+        .task {
+            background: #4caf50;
+            color: white;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 14px;
+            display: inline-block;
+            margin-left: 30px;
+            margin-top: 0px; /* 避免与时间标签重叠 */
+            user-select: none;
+        }
+
+        /* 刻度线基类 */
+        .scale-line {
+            position: absolute;      /* 绝对定位到时间块内 */
+            left: 0;                /* 紧贴竖线起点 */
+            height: 2px;
+            background: #888;
+        }
+
+        /* 小刻度线宽度较短 */
+        .scale-small {
+            width: 8px;
+        }
+
+        /* 大刻度线宽度较长，颜色更深 */
+        .scale-large {
+            width: 20px;
+            background: #444;
+        }
+
+        /* 当前时间红线 */
+        #now-line {
+            position: absolute;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: red;
+            z-index: 99;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 时间轴容器 -->
+    <div class="timeline" id="timeline">
+        <!-- JS 动态插入时间块 -->
+    </div>
+
+    <script>
+        const timeline = document.getElementById("timeline");
+
+        // 配置时间范围：早8点到晚10点
+        // const startHour = 7;
+        // const endHour = 19;
+
+        const startHour = 0;
+        const endHour = 23;
+
+        // const blockHeight = 60;        // 每小时块高度?px
+
+        // 初始化时不设置 blockHeight
+        let blockHeight;
+
+        // 创建一个临时时间块，用于测量高度
+        const tempBlock = document.createElement("div");
+        tempBlock.className = "time-block";
+        tempBlock.style.visibility = "hidden";  // 不显示
+        document.body.appendChild(tempBlock);
+
+        // 等待渲染后读取真实高度
+        blockHeight = tempBlock.getBoundingClientRect().height;
+
+        // 然后移除临时元素
+        document.body.removeChild(tempBlock);
+
+        // ✅ 现在可以使用 blockHeight 做后续刻度或红线定位计算
+
+
+        const minutesPerBlock = 60;     // 每小时60分钟
+
+        // 任务映射表
+        const taskMap = {
+            "09:00": "吃早餐",
+            "10:00": "开会",
+            "14:00": "写代码",
+            "15:00": "咖啡时间",
+            "17:00": "总结"
+        };
+
+        // 循环生成每个小时的时间块
+        for (let h = startHour; h <= endHour; h++) {
+            const timeStr = `${String(h).padStart(2, '0')}:00`;
+
+            // 创建时间块元素
+            const block = document.createElement("div");
+            block.className = "time-block";
+            block.id = `time-${h}-0`;
+            block.dataset.time = timeStr;
+
+            // 添加时间标签，左上角显示小时
+            block.innerHTML = `<div class="time-label">${timeStr}</div>`;
+
+            // 如果任务表中有对应时间，添加任务块
+            if (taskMap[timeStr]) {
+                block.innerHTML += `<div class="task">${taskMap[timeStr]}</div>`;
+            }
+
+            // 在时间块内添加10分钟刻度线（不含0分钟）
+            for (let m = 0; m <= 60; m += 10) {
+                const scaleLine = document.createElement("div");
+                scaleLine.classList.add("scale-line");
+
+                // 每30分钟用大刻度，小刻度其他
+                if (m % 30 === 0) {
+                    scaleLine.classList.add("scale-large");
+                } else {
+                    scaleLine.classList.add("scale-small");
+                }
+
+                // 计算刻度距块顶部像素
+                const topPx = (m / minutesPerBlock) * blockHeight;
+                scaleLine.style.top = `${topPx}px`;
+
+                block.appendChild(scaleLine);
+            }
+
+            // 添加时间块到时间轴容器
+            timeline.appendChild(block);
+        }
+
+        // 添加当前时间红线元素（初始位置由后续逻辑控制）
+        const nowLine = document.createElement("div");
+        nowLine.id = "now-line";
+        timeline.appendChild(nowLine);
+
+        // 更新时间红线位置和滚动到当前时间（可选，后续扩展）
+        function updateNowLineAndScroll() {
+            const now = new Date();
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+            const startMinutes = startHour * 60;
+            const offsetMinutes = currentMinutes - startMinutes;
+
+            if (offsetMinutes < 0 || offsetMinutes > (endHour - startHour + 1) * 60) return;
+
+            // 每分钟对应像素高度（120px/60min = 2px/min）
+            const topPos = offsetMinutes * (blockHeight / minutesPerBlock);
+            nowLine.style.top = `${topPos}px`;
+
+            // 滚动到当前时间块居中显示
+            const targetId = `time-${now.getHours()}-0`;
+            const target = document.getElementById(targetId);
+            if (target) {
+                target.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+        }
+
+        // 初始化调用
+        updateNowLineAndScroll();
+
+        // 每分钟更新一次红线位置
+        setInterval(updateNowLineAndScroll, 60000);
+    </script>
+</body>
+</html>

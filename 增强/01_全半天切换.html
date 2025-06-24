@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <title>时间轴任务管理（12/24小时切换）</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: sans-serif;
+        }
+
+        #toggleModeBtn {
+            margin: 10px;
+            padding: 6px 12px;
+            font-size: 14px;
+        }
+
+        .timeline {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            padding-left: 80px;
+        }
+
+        .time-block {
+            position: relative;
+            height: 25px;
+            border-left: 2px solid #ddd;
+            border-bottom: 1px dashed #eee;
+        }
+
+        .time-label {
+            position: absolute;
+            left: -80px;
+            top: 1px;
+            height: 24px;
+            line-height: 24px;
+            font-size: 14px;
+            color: #666;
+            padding: 0 6px;
+            width: 70px;
+            text-align: right;
+            user-select: none;
+            margin-top: calc(-12px);
+        }
+
+        .task {
+            padding: 3px 10px;
+            border-radius: 4px;
+            font-size: 14px;
+            display: inline-block;
+            margin-left: 30px;
+            margin-top: 0px;
+            user-select: none;
+            cursor: pointer;
+        }
+
+        .scale-line {
+            position: absolute;
+            left: 0;
+            height: 2px;
+            background: #888;
+        }
+
+        .scale-small {
+            width: 8px;
+        }
+
+        .scale-large {
+            width: 20px;
+            background: #444;
+        }
+
+        #now-line {
+            position: absolute;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: red;
+            z-index: 99;
+        }
+
+        #modalOverlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 200;
+            opacity: 0;
+            /* transition: opacity 0.3s ease; */ /* 淡出延时 */
+            transition: opacity 0.5s ease;
+        }
+
+        #modalOverlay.visible {
+            display: flex;
+            opacity: 1;
+        }
+
+        #modalBox {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            min-width: 280px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            font-size: 14px;
+            opacity: 0;
+            transform: scale(0.95);
+            /* transition: all 0.3s ease; */ /* 淡入延时 */
+            transition: all 0.5s ease;
+        }
+
+        #modalOverlay.visible #modalBox {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        #modalBox label {
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        #modalBox input[type="text"] {
+            width: 100%;
+            padding: 6px;
+            margin-bottom: 12px;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+
+        #modalBox select {
+            width: 100%;
+            padding: 6px;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+
+        #modalBox button {
+            padding: 6px 12px;
+            font-size: 14px;
+            margin-right: 8px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <button id="toggleModeBtn">切换到24小时</button>
+    <div class="timeline" id="timeline"></div>
+
+    <div id="modalOverlay">
+        <div id="modalBox">
+            <label>任务内容:
+                <input type="text" id="taskInput" />
+            </label>
+            <label>颜色选择:
+                <select id="colorSelect"></select>
+            </label>
+            <div>
+                <button id="btnSave">保存</button>
+                <button id="btnDelete">删除</button>
+                <button id="btnCancel">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const timeline = document.getElementById("timeline");
+        let startHour = 7;
+        let endHour = 19;
+        let is24HourMode = false;
+
+        const minutesPerBlock = 30;
+        let blockHeight;
+
+        const presetColors = [
+            { name: "赤", color: "#ff0000" },
+            { name: "橙", color: "#ff7f00" },
+            { name: "黄", color: "#ffff00" },
+            { name: "绿", color: "#00ff00" },
+            { name: "蓝", color: "#0000ff" },
+            { name: "靛", color: "#4b0082" },
+            { name: "紫", color: "#8b00ff" }
+        ];
+        const defaultCreateColorIndex = 6;
+
+        const taskMap = {};
+        function loadTasks() {
+            const saved = localStorage.getItem("timelineTasks");
+            if (saved) {
+                Object.assign(taskMap, JSON.parse(saved));
+            }
+        }
+
+        function saveTasks() {
+            localStorage.setItem("timelineTasks", JSON.stringify(taskMap));
+        }
+
+        function setTaskFontColor(taskDiv, bgColor) {
+            if (bgColor === "#ffff00" || bgColor === "#00ff00") {
+                taskDiv.style.color = "black";
+            } else {
+                taskDiv.style.color = "white";
+            }
+        }
+
+        const tempBlock = document.createElement("div");
+        tempBlock.className = "time-block";
+        tempBlock.style.visibility = "hidden";
+        document.body.appendChild(tempBlock);
+        blockHeight = tempBlock.getBoundingClientRect().height;
+        document.body.removeChild(tempBlock);
+
+        loadTasks();
+
+        const modalOverlay = document.getElementById("modalOverlay");
+        const taskInput = document.getElementById("taskInput");
+        const colorSelect = document.getElementById("colorSelect");
+        const btnSave = document.getElementById("btnSave");
+        const btnDelete = document.getElementById("btnDelete");
+        const btnCancel = document.getElementById("btnCancel");
+
+        presetColors.forEach((c, i) => {
+            const opt = document.createElement("option");
+            opt.value = i;
+            opt.textContent = `${i}: ${c.name}`;
+            colorSelect.appendChild(opt);
+        });
+
+        let currentTimeKey = null;
+
+        function openModal(timeStr, existingTask) {
+            currentTimeKey = timeStr;
+            if (existingTask) {
+                taskInput.value = existingTask.text;
+                const idx = presetColors.findIndex(c => c.color === existingTask.color);
+                colorSelect.value = idx >= 0 ? idx : defaultCreateColorIndex;
+                btnDelete.style.display = "inline-block";
+            } else {
+                taskInput.value = "";
+                colorSelect.value = defaultCreateColorIndex;
+                btnDelete.style.display = "none";
+            }
+            modalOverlay.style.display = "flex";
+            requestAnimationFrame(() => {
+                modalOverlay.classList.add("visible");
+            });
+            taskInput.focus();
+        }
+
+        function closeModal() {
+            modalOverlay.classList.remove("visible");
+            setTimeout(() => {
+                modalOverlay.style.display = "none";
+            // }, 300); // 隐藏元素时间 ms
+            }, 500); // 隐藏元素时间 ms
+            taskInput.value = "";
+            currentTimeKey = null;
+        }
+
+
+        function createTimeBlock(h, m) {
+            const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+            const block = document.createElement("div");
+            block.className = "time-block";
+            block.id = `time-${h}-${m}`;
+            block.dataset.time = timeStr;
+
+            if (m === 0) {
+                block.innerHTML = `<div class="time-label">${timeStr}</div>`;
+            }
+
+            if (taskMap[timeStr]) {
+                const taskInfo = taskMap[timeStr];
+                const taskDiv = document.createElement("div");
+                taskDiv.className = "task";
+                taskDiv.innerText = taskInfo.text;
+                const color = taskInfo.color || presetColors[defaultCreateColorIndex].color;
+                taskDiv.style.background = color;
+                taskDiv.dataset.color = color;
+                setTaskFontColor(taskDiv, color);
+                block.appendChild(taskDiv);
+            }
+
+            block.addEventListener("click", (e) => {
+                if (e.target.classList.contains("task")) {
+                    e.stopPropagation();
+                    openModal(timeStr, taskMap[timeStr]);
+                } else {
+                    if (!block.querySelector(".task")) {
+                        openModal(timeStr, null);
+                    }
+                }
+            });
+
+            for (let mm = 0; mm <= 30; mm += 10) {
+                const scaleLine = document.createElement("div");
+                scaleLine.classList.add("scale-line");
+                scaleLine.classList.add(mm % 30 === 0 ? "scale-large" : "scale-small");
+                const topPx = (mm / minutesPerBlock) * blockHeight;
+                scaleLine.style.top = `${topPx}px`;
+                block.appendChild(scaleLine);
+            }
+
+            timeline.appendChild(block);
+        }
+
+        function renderTimeline() {
+            timeline.innerHTML = "";
+            timeline.appendChild(nowLine);
+            for (let h = startHour; h <= endHour; h++) {
+                for (let m = 0; m < 60; m += 30) {
+                    createTimeBlock(h, m);
+                }
+            }
+            updateNowLineAndScroll();
+        }
+
+        btnSave.onclick = () => {
+            const text = taskInput.value.trim();
+            if (text === "") {
+                alert("任务内容不能为空！");
+                taskInput.focus();
+                return;
+            }
+            const colorIndex = parseInt(colorSelect.value);
+            const color = presetColors[colorIndex] ? presetColors[colorIndex].color : presetColors[defaultCreateColorIndex].color;
+
+            taskMap[currentTimeKey] = { text, color };
+            saveTasks();
+
+            const block = document.querySelector(`.time-block[data-time="${currentTimeKey}"]`);
+            let taskDiv = block.querySelector(".task");
+            if (!taskDiv) {
+                taskDiv = document.createElement("div");
+                taskDiv.className = "task";
+                block.appendChild(taskDiv);
+                taskDiv.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    openModal(currentTimeKey, taskMap[currentTimeKey]);
+                });
+            }
+            taskDiv.innerText = text;
+            taskDiv.style.background = color;
+            taskDiv.dataset.color = color;
+            setTaskFontColor(taskDiv, color);
+
+            
+            // ✅ 重绘整个时间轴，确保任务块刷新绑定了事件
+            // renderTimeline();
+
+            closeModal();
+        };
+
+        btnDelete.onclick = () => {
+            if (!confirm("确定删除该任务吗？")) return;
+            delete taskMap[currentTimeKey];
+            saveTasks();
+
+            const block = document.querySelector(`.time-block[data-time="${currentTimeKey}"]`);
+            const taskDiv = block.querySelector(".task");
+            if (taskDiv) {
+                taskDiv.remove();
+            }
+
+            closeModal();
+        };
+
+        btnCancel.onclick = () => closeModal();
+        modalOverlay.onclick = () => closeModal();
+        document.getElementById("modalBox").onclick = (e) => e.stopPropagation();
+
+        const nowLine = document.createElement("div");
+        nowLine.id = "now-line";
+        timeline.appendChild(nowLine);
+
+        function updateNowLineAndScroll() {
+            const now = new Date();
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+            const offsetMinutes = currentMinutes - startHour * 60;
+
+            if (offsetMinutes < 0 || offsetMinutes > (endHour - startHour + 1) * 60) return;
+
+            const topPos = offsetMinutes * (blockHeight / minutesPerBlock);
+            nowLine.style.top = `${topPos}px`;
+
+            const nearestH = now.getHours();
+            const nearestM = now.getMinutes() < 30 ? 0 : 30;
+            const targetId = `time-${nearestH}-${nearestM}`;
+            const target = document.getElementById(targetId);
+            if (target) {
+                target.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+        }
+
+        setInterval(updateNowLineAndScroll, 60000);
+
+        document.getElementById("toggleModeBtn").onclick = () => {
+            is24HourMode = !is24HourMode;
+            if (is24HourMode) {
+                startHour = 0;
+                endHour = 23;
+                toggleModeBtn.textContent = "切换到12小时";
+            } else {
+                startHour = 7;
+                endHour = 19;
+                toggleModeBtn.textContent = "切换到24小时";
+            }
+            renderTimeline();
+        };
+
+        renderTimeline();
+    </script>
+</body>
+</html>

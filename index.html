@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <title>时间轴任务管理（12/24小时切换）</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: sans-serif;
+        }
+
+        #toggleModeBtn,
+        #toggleEditBtn {
+            margin: 10px 5px;
+            padding: 6px 12px;
+            font-size: 14px;
+        }
+
+        .timeline {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            padding-left: 80px;
+        }
+
+        .time-block {
+            position: relative;
+            height: 25px;
+            border-left: 2px solid #ddd;
+            border-bottom: 1px dashed #eee;
+        }
+
+        .time-label {
+            position: absolute;
+            left: -80px;
+            top: 1px;
+            height: 24px;
+            line-height: 24px;
+            font-size: 14px;
+            color: #666;
+            padding: 0 6px;
+            width: 70px;
+            text-align: right;
+            user-select: none;
+            margin-top: calc(-12px);
+        }
+
+        .task {
+            padding: 3px 10px;
+            border-radius: 4px;
+            font-size: 14px;
+            display: inline-block;
+            margin-left: 30px;
+            margin-top: 0px;
+            user-select: none;
+            cursor: pointer;
+        }
+
+        .scale-line {
+            position: absolute;
+            left: 0;
+            height: 2px;
+            background: #888;
+        }
+
+        .scale-small {
+            width: 8px;
+        }
+
+        .scale-large {
+            width: 20px;
+            background: #444;
+        }
+
+        #now-line {
+            position: absolute;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: red;
+            z-index: 99;
+        }
+
+        #modalOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 200;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+
+        #modalOverlay.visible {
+            display: flex;
+            opacity: 1;
+        }
+
+        #modalBox {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            min-width: 280px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            font-size: 14px;
+            opacity: 0;
+            transform: scale(0.95);
+            transition: all 0.5s ease;
+        }
+
+        #modalOverlay.visible #modalBox {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        #modalBox label {
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        #modalBox input[type="text"],
+        #modalBox input[type="time"],
+        #modalBox select {
+            width: 100%;
+            padding: 6px;
+            font-size: 14px;
+            margin-bottom: 12px;
+            box-sizing: border-box;
+        }
+
+        #modalBox button {
+            padding: 6px 12px;
+            font-size: 14px;
+            margin-right: 8px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <button id="toggleModeBtn">切换到24小时</button>
+    <button id="toggleEditBtn">🔓 可编辑</button>
+    <div class="timeline" id="timeline"></div>
+
+    <div id="modalOverlay">
+        <div id="modalBox">
+            <label>开始时间显示（仅文本）:
+                <input type="time" id="startTimeInput" />
+            </label>
+            <label>任务内容:
+                <input type="text" id="taskInput" />
+            </label>
+            <label>颜色选择:
+                <select id="colorSelect"></select>
+            </label>
+            <label>持续时间（块）:
+                <select id="durationSelect">
+                    <option value="1">1 块（30分钟）</option>
+                    <option value="2">2 块（1小时）</option>
+                    <option value="3">3 块（1.5小时）</option>
+                    <option value="4">4 块（2小时）</option>
+                </select>
+            </label>
+            <div>
+                <button id="btnSave">保存</button>
+                <button id="btnDelete">删除</button>
+                <button id="btnCancel">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const timeline = document.getElementById("timeline");
+        let startHour = 7;
+        let endHour = 19;
+        let is24HourMode = false;
+        let isEditable = true;
+
+        const toggleEditBtn = document.getElementById("toggleEditBtn");
+        function updateEditButtonText() {
+            toggleEditBtn.textContent = isEditable ? "🔓 可编辑" : "🔒 已锁定";
+        }
+        updateEditButtonText();
+
+        toggleEditBtn.onclick = () => {
+            isEditable = !isEditable;
+            updateEditButtonText();
+        };
+
+        const minutesPerBlock = 30;
+        let blockHeight;
+
+        const presetColors = [
+            { name: "赤", color: "#ff0000" },
+            { name: "橙", color: "#ff7f00" },
+            { name: "黄", color: "#ffff00" },
+            { name: "绿", color: "#00ff00" },
+            { name: "蓝", color: "#0000ff" },
+            { name: "靛", color: "#4b0082" },
+            { name: "紫", color: "#8b00ff" }
+        ];
+        const defaultCreateColorIndex = 6;
+
+        const taskMap = {};
+        function loadTasks() {
+            const saved = localStorage.getItem("timelineTasks");
+            if (saved) Object.assign(taskMap, JSON.parse(saved));
+        }
+
+        function saveTasks() {
+            localStorage.setItem("timelineTasks", JSON.stringify(taskMap));
+        }
+
+        function setTaskFontColor(taskDiv, bgColor) {
+            if (bgColor === "#ffff00" || bgColor === "#00ff00") {
+                taskDiv.style.color = "black";
+            } else {
+                taskDiv.style.color = "white";
+            }
+        }
+
+        const tempBlock = document.createElement("div");
+        tempBlock.className = "time-block";
+        tempBlock.style.visibility = "hidden";
+        document.body.appendChild(tempBlock);
+        blockHeight = tempBlock.getBoundingClientRect().height;
+        document.body.removeChild(tempBlock);
+
+        loadTasks();
+
+        const modalOverlay = document.getElementById("modalOverlay");
+        const taskInput = document.getElementById("taskInput");
+        const startTimeInput = document.getElementById("startTimeInput");
+        const colorSelect = document.getElementById("colorSelect");
+        const durationSelect = document.getElementById("durationSelect");
+        const btnSave = document.getElementById("btnSave");
+        const btnDelete = document.getElementById("btnDelete");
+        const btnCancel = document.getElementById("btnCancel");
+
+        presetColors.forEach((c, i) => {
+            const opt = document.createElement("option");
+            opt.value = i;
+            opt.textContent = `${i}: ${c.name}`;
+            colorSelect.appendChild(opt);
+        });
+
+        let currentTimeKey = null;
+
+        function openModal(timeStr, existingTask) {
+            currentTimeKey = timeStr;
+            if (existingTask) {
+                taskInput.value = existingTask.text;
+                startTimeInput.value = existingTask.startText || "";
+                const idx = presetColors.findIndex(c => c.color === existingTask.color);
+                colorSelect.value = idx >= 0 ? idx : defaultCreateColorIndex;
+                durationSelect.value = "1";
+                btnDelete.style.display = "inline-block";
+            } else {
+                taskInput.value = "";
+                startTimeInput.value = "";
+                colorSelect.value = defaultCreateColorIndex;
+                durationSelect.value = "1";
+                btnDelete.style.display = "none";
+            }
+            modalOverlay.style.display = "flex";
+            requestAnimationFrame(() => {
+                modalOverlay.classList.add("visible");
+            });
+            taskInput.focus();
+        }
+
+        function closeModal() {
+            modalOverlay.classList.remove("visible");
+            setTimeout(() => {
+                modalOverlay.style.display = "none";
+            }, 500);
+            taskInput.value = "";
+            startTimeInput.value = "";
+            currentTimeKey = null;
+        }
+
+        function createTimeBlock(h, m) {
+            const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+            const block = document.createElement("div");
+            block.className = "time-block";
+            block.id = `time-${h}-${m}`;
+            block.dataset.time = timeStr;
+
+            if (m === 0) {
+                block.innerHTML = `<div class="time-label">${timeStr}</div>`;
+            }
+
+            if (taskMap[timeStr]) {
+                const taskInfo = taskMap[timeStr];
+                const taskDiv = document.createElement("div");
+                taskDiv.className = "task";
+                const prefix = taskInfo.startText ? `🕒${taskInfo.startText}，` : "";
+                taskDiv.innerText = prefix + taskInfo.text;
+                const color = taskInfo.color || presetColors[defaultCreateColorIndex].color;
+                taskDiv.style.background = color;
+                taskDiv.dataset.color = color;
+                setTaskFontColor(taskDiv, color);
+                block.appendChild(taskDiv);
+            }
+
+            block.addEventListener("click", (e) => {
+                if (!isEditable) return;
+                if (e.target.classList.contains("task")) {
+                    e.stopPropagation();
+                    openModal(timeStr, taskMap[timeStr]);
+                } else {
+                    if (!block.querySelector(".task")) {
+                        openModal(timeStr, null);
+                    }
+                }
+            });
+
+            for (let mm = 0; mm <= 30; mm += 10) {
+                const scaleLine = document.createElement("div");
+                scaleLine.classList.add("scale-line");
+                scaleLine.classList.add(mm % 30 === 0 ? "scale-large" : "scale-small");
+                const topPx = (mm / minutesPerBlock) * blockHeight;
+                scaleLine.style.top = `${topPx}px`;
+                block.appendChild(scaleLine);
+            }
+
+            timeline.appendChild(block);
+        }
+
+        btnSave.onclick = () => {
+            const text = taskInput.value.trim();
+            const startText = startTimeInput.value.trim();
+            const duration = parseInt(durationSelect.value);
+            if (text === "") {
+                alert("任务内容不能为空！");
+                taskInput.focus();
+                return;
+            }
+
+            const colorIndex = parseInt(colorSelect.value);
+            const color = presetColors[colorIndex] ? presetColors[colorIndex].color : presetColors[defaultCreateColorIndex].color;
+
+            // 可连续的时间块
+            var availbleBlocks = 2; //为什么选2具体看调试
+
+            // 解析当前时间块
+            const [h, m] = currentTimeKey.split(":").map(Number);
+            const occupiedBlocks = [];
+
+            for (let i = 0; i < duration; i++) {
+                const totalMinutes = h * 60 + m + i * minutesPerBlock;
+                const hh = Math.floor(totalMinutes / 60);
+                const mm = totalMinutes % 60;
+                const key = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+
+                if (taskMap[key]) {
+                    occupiedBlocks.push(key);
+
+                    // 不提示了, 直接退出
+                    break;
+                }
+
+                availbleBlocks++;
+            }
+
+            // if (occupiedBlocks.length > 0) {
+            //     const msg = "以下时间块已有任务：\n" + occupiedBlocks.join(", ") + "\n是否覆盖？";
+            //     if (!confirm(msg)) return;
+            // }
+
+            
+            // 开始写入任务
+                // for (let i = 0; i < duration; i++) {     // 输入的快数
+            for (let i = 0; i < (availbleBlocks < duration ? availbleBlocks : duration); i++) {  // 可用的块数 // 哪个小用那个
+                const totalMinutes = h * 60 + m + i * minutesPerBlock;
+                const hh = Math.floor(totalMinutes / 60);
+                const mm = totalMinutes % 60;
+                const key = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+                taskMap[key] = {
+                    text,
+                    color,
+                    startText: i === 0 ? startText : ""
+                };
+            }
+
+            saveTasks();
+            renderTimeline();
+            closeModal();
+        };
+
+
+        btnDelete.onclick = () => {
+            if (!confirm("确定删除该任务吗？")) return;
+            delete taskMap[currentTimeKey];
+            saveTasks();
+            renderTimeline();
+            closeModal();
+        };
+
+        btnCancel.onclick = () => closeModal();
+        modalOverlay.onclick = () => closeModal();
+        document.getElementById("modalBox").onclick = (e) => e.stopPropagation();
+
+        const nowLine = document.createElement("div");
+        nowLine.id = "now-line";
+        timeline.appendChild(nowLine);
+
+        function updateNowLineAndScroll() {
+            const now = new Date();
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+            const offsetMinutes = currentMinutes - startHour * 60;
+
+            if (offsetMinutes < 0 || offsetMinutes > (endHour - startHour + 1) * 60) return;
+
+            const topPos = offsetMinutes * (blockHeight / minutesPerBlock);
+            nowLine.style.top = `${topPos}px`;
+
+            const nearestH = now.getHours();
+            const nearestM = now.getMinutes() < 30 ? 0 : 30;
+            const targetId = `time-${nearestH}-${nearestM}`;
+            const target = document.getElementById(targetId);
+            if (target) {
+                target.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+        }
+
+        setInterval(updateNowLineAndScroll, 60000);
+
+        document.getElementById("toggleModeBtn").onclick = () => {
+            is24HourMode = !is24HourMode;
+            if (is24HourMode) {
+                startHour = 0;
+                endHour = 23;
+                toggleModeBtn.textContent = "切换到12小时";
+            } else {
+                startHour = 7;
+                endHour = 19;
+                toggleModeBtn.textContent = "切换到24小时";
+            }
+            renderTimeline();
+        };
+
+        function renderTimeline() {
+            timeline.innerHTML = "";
+            timeline.appendChild(nowLine);
+            for (let h = startHour; h <= endHour; h++) {
+                for (let m = 0; m < 60; m += 30) {
+                    createTimeBlock(h, m);
+                }
+            }
+            updateNowLineAndScroll();
+        }
+
+        renderTimeline();
+    </script>
+</body>
+</html>

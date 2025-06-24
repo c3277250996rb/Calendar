@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <title>时间轴任务管理（彩虹色，带颜色名提示）</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: sans-serif;
+        }
+
+        .timeline {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            padding-left: 80px;
+        }
+
+        .time-block {
+            position: relative;
+            height: 55px;
+            border-left: 2px solid #ddd;
+            border-bottom: 1px dashed #eee;
+        }
+
+        .time-label {
+            position: absolute;
+            left: -80px;
+            top: 1px;
+            height: 24px;
+            line-height: 24px;
+            font-size: 14px;
+            color: #666;
+            padding: 0 6px;
+            width: 70px;
+            text-align: right;
+            user-select: none;
+            margin-top: calc(-12px);
+        }
+
+        .task {
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 14px;
+            display: inline-block;
+            margin-left: 30px;
+            margin-top: 0px;
+            user-select: none;
+            cursor: pointer;
+        }
+
+        .scale-line {
+            position: absolute;
+            left: 0;
+            height: 2px;
+            background: #888;
+        }
+
+        .scale-small {
+            width: 8px;
+        }
+
+        .scale-large {
+            width: 20px;
+            background: #444;
+        }
+
+        #now-line {
+            position: absolute;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: red;
+            z-index: 99;
+        }
+    </style>
+</head>
+<body>
+    <div class="timeline" id="timeline"></div>
+
+    <script>
+        const timeline = document.getElementById("timeline");
+        const startHour = 0;
+        const endHour = 23;
+        const minutesPerBlock = 30;
+        let blockHeight;
+
+        // 彩虹色顺序，带名字
+        const presetColors = [
+            { name: "赤", color: "#ff0000" },
+            { name: "橙", color: "#ff7f00" },
+            { name: "黄", color: "#ffff00" },
+            { name: "绿", color: "#00ff00" },
+            { name: "蓝", color: "#0000ff" },
+            { name: "靛", color: "#4b0082" },
+            { name: "紫", color: "#8b00ff" }
+        ];
+        const defaultCreateColorIndex = 3; // 默认绿色
+
+        const taskMap = {};
+        function loadTasks() {
+            const saved = localStorage.getItem("timelineTasks");
+            if (saved) {
+                Object.assign(taskMap, JSON.parse(saved));
+            }
+        }
+        function saveTasks() {
+            localStorage.setItem("timelineTasks", JSON.stringify(taskMap));
+        }
+
+        function setTaskFontColor(taskDiv, bgColor) {
+            if (bgColor === "#ffff00" || bgColor === "#00ff00") {
+                taskDiv.style.color = "black";
+            } else {
+                taskDiv.style.color = "white";
+            }
+        }
+
+        const tempBlock = document.createElement("div");
+        tempBlock.className = "time-block";
+        tempBlock.style.visibility = "hidden";
+        document.body.appendChild(tempBlock);
+        blockHeight = tempBlock.getBoundingClientRect().height;
+        document.body.removeChild(tempBlock);
+
+        loadTasks();
+
+        for (let h = startHour; h <= endHour; h++) {
+            for (let m = 0; m < 60; m += 30) {
+                const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                const block = document.createElement("div");
+                block.className = "time-block";
+                block.id = `time-${h}-${m}`;
+                block.dataset.time = timeStr;
+
+                if (m === 0) {
+                    block.innerHTML = `<div class="time-label">${timeStr}</div>`;
+                }
+
+                // 加载任务
+                if (taskMap[timeStr]) {
+                    const taskInfo = taskMap[timeStr];
+                    const taskDiv = document.createElement("div");
+                    taskDiv.className = "task";
+                    taskDiv.innerText = taskInfo.text;
+                    const color = taskInfo.color || presetColors[defaultCreateColorIndex].color;
+                    taskDiv.style.background = color;
+                    taskDiv.dataset.color = color;
+                    setTaskFontColor(taskDiv, color);
+                    block.appendChild(taskDiv);
+                }
+
+                // 点击事件：新增 / 修改 / 删除
+                block.addEventListener("click", function (e) {
+                    if (e.target.classList.contains("task")) {
+                        const oldText = e.target.innerText;
+                        const oldColor = e.target.dataset.color || presetColors[defaultCreateColorIndex].color;
+                        let oldIndex = presetColors.findIndex(c => c.color === oldColor);
+                        if (oldIndex === -1) oldIndex = defaultCreateColorIndex;
+
+                        const newText = prompt("修改任务内容（留空则删除）：", oldText);
+                        if (newText === null) return;
+
+                        if (newText.trim() === "") {
+                            e.target.remove();
+                            delete taskMap[timeStr];
+                            saveTasks();
+                        } else {
+                            let colorIndex = prompt(
+                                "选择颜色编号 (0~6)：\n" +
+                                presetColors.map((c, i) => `${i}: ${c.name}`).join("\n"),
+                                oldIndex
+                            );
+                            colorIndex = parseInt(colorIndex);
+                            if (isNaN(colorIndex) || colorIndex < 0 || colorIndex >= presetColors.length) {
+                                colorIndex = defaultCreateColorIndex;
+                            }
+                            const newColor = presetColors[colorIndex].color;
+
+                            e.target.innerText = newText;
+                            e.target.style.background = newColor;
+                            e.target.dataset.color = newColor;
+                            setTaskFontColor(e.target, newColor);
+
+                            taskMap[timeStr] = {
+                                text: newText,
+                                color: newColor
+                            };
+                            saveTasks();
+                        }
+
+                        e.stopPropagation();
+                        return;
+                    }
+
+                    // 添加新任务
+                    if (!this.querySelector(".task")) {
+                        const taskName = prompt(`为 ${timeStr} 添加任务：`);
+                        if (taskName && taskName.trim() !== "") {
+                            let colorIndex = prompt(
+                                "选择颜色编号 (0~6)：\n" +
+                                presetColors.map((c, i) => `${i}: ${c.name}`).join("\n"),
+                                defaultCreateColorIndex
+                            );
+                            colorIndex = parseInt(colorIndex);
+                            if (isNaN(colorIndex) || colorIndex < 0 || colorIndex >= presetColors.length) {
+                                colorIndex = defaultCreateColorIndex;
+                            }
+                            const taskColor = presetColors[colorIndex].color;
+
+                            const taskDiv = document.createElement("div");
+                            taskDiv.className = "task";
+                            taskDiv.innerText = taskName;
+                            taskDiv.style.background = taskColor;
+                            taskDiv.dataset.color = taskColor;
+                            setTaskFontColor(taskDiv, taskColor);
+
+                            this.appendChild(taskDiv);
+                            taskMap[timeStr] = {
+                                text: taskName,
+                                color: taskColor
+                            };
+                            saveTasks();
+                        }
+                    }
+                });
+
+                // 刻度线（每 10 分钟）
+                for (let mm = 0; mm <= 30; mm += 10) {
+                    const scaleLine = document.createElement("div");
+                    scaleLine.classList.add("scale-line");
+                    scaleLine.classList.add(mm % 30 === 0 ? "scale-large" : "scale-small");
+                    const topPx = (mm / minutesPerBlock) * blockHeight;
+                    scaleLine.style.top = `${topPx}px`;
+                    block.appendChild(scaleLine);
+                }
+
+                timeline.appendChild(block);
+            }
+        }
+
+        // 当前时间红线
+        const nowLine = document.createElement("div");
+        nowLine.id = "now-line";
+        timeline.appendChild(nowLine);
+
+        function updateNowLineAndScroll() {
+            const now = new Date();
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+            const startMinutes = startHour * 60;
+            const offsetMinutes = currentMinutes - startMinutes;
+
+            if (offsetMinutes < 0 || offsetMinutes > (endHour - startHour + 1) * 60) return;
+
+            const topPos = offsetMinutes * (blockHeight / minutesPerBlock);
+            nowLine.style.top = `${topPos}px`;
+
+            const nearestH = now.getHours();
+            const nearestM = now.getMinutes() < 30 ? 0 : 30;
+            const targetId = `time-${nearestH}-${nearestM}`;
+            const target = document.getElementById(targetId);
+            if (target) {
+                target.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+        }
+
+        updateNowLineAndScroll();
+        setInterval(updateNowLineAndScroll, 60000);
+    </script>
+</body>
+</html>

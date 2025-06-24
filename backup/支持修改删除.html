@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <title>每小时一格时间轴 - 交互添加任务</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: sans-serif;
+        }
+        .timeline {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            padding-left: 80px;
+        }
+        .time-block {
+            position: relative;
+            height: 37px;
+            border-left: 2px solid #ddd;
+            border-bottom: 1px dashed #eee;
+        }
+        .time-label {
+            position: absolute;
+            left: -80px;
+            top: 1px;
+            height: 24px;
+            line-height: 24px;
+            font-size: 14px;
+            color: #666;
+            padding: 0 6px;
+            width: 70px;
+            text-align: right;
+            user-select: none;
+            margin-top: calc(-12px);
+        }
+        .task {
+            background: #4caf50;
+            color: white;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 14px;
+            display: inline-block;
+            margin-left: 30px;
+            margin-top: 0px;
+            user-select: none;
+            cursor: pointer;
+        }
+        .scale-line {
+            position: absolute;
+            left: 0;
+            height: 2px;
+            background: #888;
+        }
+        .scale-small {
+            width: 8px;
+        }
+        .scale-large {
+            width: 20px;
+            background: #444;
+        }
+        #now-line {
+            position: absolute;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: red;
+            z-index: 99;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="timeline" id="timeline"></div>
+
+    <script>
+        const timeline = document.getElementById("timeline");
+        const startHour = 0;
+        const endHour = 23;
+        let blockHeight;
+
+        // 1. 获取块高度
+        const tempBlock = document.createElement("div");
+        tempBlock.className = "time-block";
+        tempBlock.style.visibility = "hidden";
+        document.body.appendChild(tempBlock);
+        blockHeight = tempBlock.getBoundingClientRect().height;
+        document.body.removeChild(tempBlock);
+
+        // 2. 每块30分钟
+        const minutesPerBlock = 30;
+
+        // 3. 任务映射（支持更精细时间）
+        const taskMap = {};
+        function loadTasks() {
+            const saved = localStorage.getItem("timelineTasks");
+            if (saved) {
+                Object.assign(taskMap, JSON.parse(saved));
+            }
+        }
+        function saveTasks() {
+            localStorage.setItem("timelineTasks", JSON.stringify(taskMap));
+        }
+        loadTasks();
+
+        // 4. 生成时间块（每小时两块）
+        for (let h = startHour; h <= endHour; h++) {
+            for (let m = 0; m < 60; m += 30) {
+                const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                const block = document.createElement("div");
+                block.className = "time-block";
+                block.id = `time-${h}-${m}`;
+                block.dataset.time = timeStr;
+
+                if (m === 0) {
+                    block.innerHTML = `<div class="time-label">${timeStr}</div>`;
+                }
+
+                if (taskMap[timeStr]) {
+                    block.innerHTML += `<div class="task">${taskMap[timeStr]}</div>`;
+                }
+
+                // 点击添加/修改任务
+                block.addEventListener("click", function (e) {
+                    if (e.target.classList.contains("task")) {
+                        const oldText = e.target.innerText;
+                        const newText = prompt("修改任务内容（留空则删除）：", oldText);
+
+                        if (newText === null) {
+                            // 用户点击了取消，什么都不做
+                            return;
+                        }
+
+                        if (newText.trim() === "") {
+                            // 删除任务
+                            e.target.remove();
+                            delete taskMap[timeStr];
+                            saveTasks();
+                        } else {
+                            // 修改任务
+                            e.target.innerText = newText;
+                            taskMap[timeStr] = newText;
+                            saveTasks();
+                        }
+
+                        e.stopPropagation();
+                        return;
+                    }
+
+
+                    if (!this.querySelector(".task")) {
+                        const taskName = prompt(`为 ${timeStr} 添加任务：`);
+                        if (taskName && taskName.trim() !== "") {
+                            const taskDiv = document.createElement("div");
+                            taskDiv.className = "task";
+                            taskDiv.innerText = taskName;
+                            this.appendChild(taskDiv);
+                            taskMap[timeStr] = taskName;
+                            saveTasks();
+                        }
+                    }
+                });
+
+                // 刻度线（每10分钟）
+                for (let mm = 0; mm <= 30; mm += 10) {
+                    const scaleLine = document.createElement("div");
+                    scaleLine.classList.add("scale-line");
+                    scaleLine.classList.add(mm % 30 === 0 ? "scale-large" : "scale-small");
+                    const topPx = (mm / minutesPerBlock) * blockHeight;
+                    scaleLine.style.top = `${topPx}px`;
+                    block.appendChild(scaleLine);
+                }
+
+                timeline.appendChild(block);
+            }
+        }
+
+        // 5. 当前时间红线
+        const nowLine = document.createElement("div");
+        nowLine.id = "now-line";
+        timeline.appendChild(nowLine);
+
+        function updateNowLineAndScroll() {
+            const now = new Date();
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+            const startMinutes = startHour * 60;
+            const offsetMinutes = currentMinutes - startMinutes;
+
+            if (offsetMinutes < 0 || offsetMinutes > (endHour - startHour + 1) * 60) return;
+
+            const topPos = offsetMinutes * (blockHeight / minutesPerBlock);
+            nowLine.style.top = `${topPos}px`;
+
+            const nearestH = now.getHours();
+            const nearestM = now.getMinutes() < 30 ? 0 : 30;
+            const targetId = `time-${nearestH}-${nearestM}`;
+            const target = document.getElementById(targetId);
+            if (target) {
+                target.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+        }
+
+        updateNowLineAndScroll();
+        setInterval(updateNowLineAndScroll, 60000);
+
+
+        // 清除数据控制台命令👉 localStorage.removeItem("timelineTasks");
+
+    </script>
+</body>
+</html>
